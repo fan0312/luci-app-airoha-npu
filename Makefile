@@ -13,14 +13,20 @@ LUCI_TITLE:=LuCI Airoha NPU Status
 LUCI_DEPENDS:=+luci-base
 LUCI_PKGARCH:=all
 
-# 平台检查（保留硬件限制）
+# 添加国际化支持
+LUCI_I18N:=en zh-cn
+
 define Package/luci-app-airoha-npu
-  $(call Package/luci/emplate)
+  SECTION:=luci
+  CATEGORY:=LuCI
+  SUBMENU:=Applications
+  TITLE:=LuCI Airoha NPU Status
   DEPENDS:=@TARGET_airoha +luci-base
+  PKGARCH:=all
 endef
 
 define Package/luci-app-airoha-npu/description
-  LuCI interface for Airoha NPU (Neural Processing Unit) status monitoring and control
+  LuCI interface for Airoha NPU (Neural Processing Unit) status monitoring and control.
   This package provides a web interface to monitor and configure the NPU on Airoha platforms.
 endef
 
