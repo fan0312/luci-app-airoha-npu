@@ -26,12 +26,6 @@ var callSetMaxFreq = rpc.declare({
 	params: ['freq']
 });
 
-var callSetOverclock = rpc.declare({
-	object: 'luci.airoha_npu',
-	method: 'setOverclock',
-	params: ['freq_mhz']
-});
-
 function formatBytes(bytes) {
 	if (bytes === 0) return '0 B';
 	var k = 1024;
@@ -126,28 +120,15 @@ function renderMaxFreqSelect(availFreqs, currentMax) {
 	return select;
 }
 
-function renderFreqBar(hwFreq, minFreq, maxFreq, pllFreqMhz) {
+function renderFreqBar(hwFreq, minFreq, maxFreq) {
 	if (!maxFreq || maxFreq === 0) return E('span', {}, 'N/A');
 
-	var displayMax = maxFreq;
-	var displayFreq = hwFreq;
-
-	// If overclocked beyond OPP table, adjust the bar range
-	if (pllFreqMhz > 0 && (pllFreqMhz * 1000) > maxFreq) {
-		displayMax = pllFreqMhz * 1000;
-		displayFreq = pllFreqMhz * 1000;
-	}
-
-	var pct = Math.round(((displayFreq - minFreq) / (displayMax - minFreq)) * 100);
+	var pct = Math.round(((hwFreq - minFreq) / (maxFreq - minFreq)) * 100);
 	if (pct < 0) pct = 0;
 	if (pct > 100) pct = 100;
 
-	var isOverclocked = pllFreqMhz > 0 && (pllFreqMhz * 1000) > maxFreq;
-	var barColor = isOverclocked
-		? 'linear-gradient(90deg,#e65100,#ff9800)'
-		: 'linear-gradient(90deg,#2e7d32,#66bb6a)';
-
-	var freqLabel = isOverclocked ? (pllFreqMhz + ' MHz (OC)') : formatFreqMHz(hwFreq);
+	var barColor = 'linear-gradient(90deg,#2e7d32,#66bb6a)';
+	var freqLabel = formatFreqMHz(hwFreq);
 
 	return E('div', { 'id': 'cpu-freq-bar-wrap', 'style': 'display:flex;align-items:center;gap:10px' }, [
 		E('span', { 'style': 'color:#aaa;font-size:90%' }, formatFreqMHz(minFreq)),
@@ -156,93 +137,27 @@ function renderFreqBar(hwFreq, minFreq, maxFreq, pllFreqMhz) {
 			E('span', { 'id': 'cpu-freq-text', 'style': 'position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:13px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6)' },
 				freqLabel),
 		]),
-		E('span', { 'id': 'cpu-freq-max-label', 'style': 'color:#aaa;font-size:90%' }, formatFreqMHz(displayMax))
+		E('span', { 'id': 'cpu-freq-max-label', 'style': 'color:#aaa;font-size:90%' }, formatFreqMHz(maxFreq))
 	]);
 }
 
-function updateFreqBar(hwFreq, minFreq, maxFreq, pllFreqMhz) {
+function updateFreqBar(hwFreq, minFreq, maxFreq) {
 	var textEl = document.getElementById('cpu-freq-text');
 	var fillEl = document.getElementById('cpu-freq-fill');
 	var maxLabel = document.getElementById('cpu-freq-max-label');
 
-	var displayMax = maxFreq;
-	var displayFreq = hwFreq;
-	var isOverclocked = pllFreqMhz > 0 && (pllFreqMhz * 1000) > maxFreq;
-
-	if (isOverclocked) {
-		displayMax = pllFreqMhz * 1000;
-		displayFreq = pllFreqMhz * 1000;
-	}
-
 	if (textEl) {
-		textEl.textContent = isOverclocked ? (pllFreqMhz + ' MHz (OC)') : formatFreqMHz(hwFreq);
+		textEl.textContent = formatFreqMHz(hwFreq);
 	}
-	if (fillEl && displayMax > 0) {
-		var pct = Math.round(((displayFreq - minFreq) / (displayMax - minFreq)) * 100);
+	if (fillEl && maxFreq > 0) {
+		var pct = Math.round(((hwFreq - minFreq) / (maxFreq - minFreq)) * 100);
 		if (pct < 0) pct = 0;
 		if (pct > 100) pct = 100;
 		fillEl.style.width = pct + '%';
-		fillEl.style.background = isOverclocked
-			? 'linear-gradient(90deg,#e65100,#ff9800)'
-			: 'linear-gradient(90deg,#2e7d32,#66bb6a)';
 	}
 	if (maxLabel) {
-		maxLabel.textContent = formatFreqMHz(displayMax);
+		maxLabel.textContent = formatFreqMHz(maxFreq);
 	}
-}
-
-function renderOverclockControls() {
-	var input = E('input', {
-		'id': 'oc-freq-input',
-		'type': 'number',
-		'min': '500',
-		'max': '1600',
-		'step': '50',
-		'value': '1400',
-		'class': 'cbi-input-text',
-		'style': 'width:100px'
-	});
-
-	var btn = E('button', {
-		'class': 'cbi-button cbi-button-action',
-		'style': 'margin-left:8px',
-		'click': function() {
-			var freq = parseInt(document.getElementById('oc-freq-input').value);
-			if (isNaN(freq) || freq < 500 || freq > 1600) {
-				ui.addNotification(null, E('p', {}, _('Frequency must be 500-1600 MHz')), 'error');
-				return;
-			}
-			if (freq > 1400) {
-				if (!confirm('WARNING: Frequencies above 1400 MHz may be unstable at stock voltage. Continue?')) {
-					return;
-				}
-			}
-			btn.disabled = true;
-			btn.textContent = _('Applying...');
-			callSetOverclock(freq).then(function(res) {
-				btn.disabled = false;
-				btn.textContent = _('Apply');
-				if (res && res.error) {
-					ui.addNotification(null, E('p', {}, _('Overclock failed: ') + res.error), 'error');
-				} else if (res && res.result === 'ok') {
-					ui.addNotification(null, E('p', {},
-						_('CPU set to ') + res.actual_mhz + ' MHz (PCW=' + res.pcw + ', posdiv=' + res.posdiv + ')'), 'info');
-				}
-			}).catch(function(err) {
-				btn.disabled = false;
-				btn.textContent = _('Apply');
-				ui.addNotification(null, E('p', {}, _('Overclock failed: ') + err.message), 'error');
-			});
-		}
-	}, _('Apply'));
-
-	return E('div', { 'style': 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, [
-		input,
-		E('span', { 'style': 'color:#aaa' }, 'MHz'),
-		btn,
-		E('span', { 'style': 'color:#888;font-size:85%;margin-left:8px' },
-			_('Direct PLL programming. Governor locked to performance. Stock max: 1200 MHz. Tested stable up to 1500 MHz.'))
-	]);
 }
 
 function renderPpeRows(entries) {
@@ -290,7 +205,7 @@ return view.extend({
 					E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td', 'width': '33%' }, E('strong', {}, _('Current Frequency'))),
 						E('td', { 'class': 'td' },
-							renderFreqBar(status.cpu_hw_freq, status.cpu_min_freq, status.cpu_max_freq, status.pll_freq_mhz))
+							renderFreqBar(status.cpu_hw_freq, status.cpu_min_freq, status.cpu_max_freq))
 					]),
 					E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td' }, E('strong', {}, _('Governor'))),
@@ -301,10 +216,6 @@ return view.extend({
 						E('td', { 'class': 'td' }, E('strong', {}, _('Max Frequency'))),
 						E('td', { 'class': 'td' },
 							renderMaxFreqSelect(status.cpu_avail_freqs, status.cpu_max_freq))
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td' }, E('strong', {}, _('Overclock'))),
-						E('td', { 'class': 'td' }, renderOverclockControls())
 					]),
 					E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td' }, E('strong', {}, _('CPU Cores'))),
@@ -376,7 +287,7 @@ return view.extend({
 				var entries = Array.isArray(ppeData.entries) ? ppeData.entries : [];
 
 				// Update CPU frequency bar
-				updateFreqBar(status.cpu_hw_freq, status.cpu_min_freq, status.cpu_max_freq, status.pll_freq_mhz);
+				updateFreqBar(status.cpu_hw_freq, status.cpu_min_freq, status.cpu_max_freq);
 
 				// Update governor select
 				var govSelect = document.getElementById('cpu-governor-select');
